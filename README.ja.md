@@ -32,6 +32,8 @@ AF 差でサイトを除外すると、表現型や祖先と関連する本物�
 
 ## 基本の流れ
 
+具体的な手順は [チュートリアル: NovaSeq 6000 と NovaSeq X Plus の混在データからバッチエフェクトを除いた VCF を作る](docs/tutorial.ja.md) を参照してください。
+
 ```
 joint call 後の VCF
  ├─ ① 診断     batch_af_test_vcf.py   バッチ差の大きさ (λ, 欠測差, HWE) を把握

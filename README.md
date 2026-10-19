@@ -33,6 +33,8 @@ No installation is needed: clone the repository and run the scripts directly (`b
 
 ## Workflow
 
+A step-by-step tutorial (in Japanese) for a cohort that mixes NovaSeq 6000 and NovaSeq X Plus: [docs/tutorial.ja.md](docs/tutorial.ja.md).
+
 ```
 joint-called VCF
  ├─ 1. diagnose      batch_af_test_vcf.py   size of the batch effect (λ, missingness difference, HWE)
