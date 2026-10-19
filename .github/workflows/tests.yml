@@ -1,0 +1,34 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  full:
+    # All tools. Ubuntu 24.04 packages: bcftools 1.19, Python 3.12 with numpy / pandas / scipy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bcftools python3-numpy python3-pandas python3-scipy
+      - name: Versions
+        run: |
+          bcftools --version | head -n 2
+          /usr/bin/python3 -c "import sys, numpy, pandas, scipy; print(sys.version.split()[0], numpy.__version__, pandas.__version__, scipy.__version__)"
+      - name: Run tests
+        run: /usr/bin/python3 tests/run_tests.py -v
+
+  minimal:
+    # filter_gwas.py needs only bcftools and the Python standard library (diagnostic-tool tests are skipped)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bcftools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bcftools
+      - name: Run tests
+        run: python3 -I tests/run_tests.py -v
