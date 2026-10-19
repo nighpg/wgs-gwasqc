@@ -1,5 +1,7 @@
 # wgs-gwasqc
 
+[![tests](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml/badge.svg)](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml)
+
 [English](README.md) | **日本語**
 
 joint call 後の VCF から、**GWAS に使うサイトを選ぶ**ためのツール群です。

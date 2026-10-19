@@ -1,5 +1,7 @@
 # wgs-gwasqc
 
+[![tests](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml/badge.svg)](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml)
+
 **English** | [日本語](README.ja.md)
 
 Tools for **selecting GWAS-ready sites from a joint-called WGS VCF**.
