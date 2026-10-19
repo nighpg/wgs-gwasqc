@@ -9,7 +9,7 @@ jobs:
     # All tools. Ubuntu 24.04 packages: bcftools 1.19, Python 3.12 with numpy / pandas / scipy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -25,7 +25,7 @@ jobs:
     # filter_gwas.py needs only bcftools and the Python standard library (diagnostic-tool tests are skipped)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install bcftools
         run: |
           sudo apt-get update
