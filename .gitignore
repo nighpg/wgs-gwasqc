@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+# 解析の出力・一時ファイル
+*.bcf
+*.bcf.csi
+*.vcf.gz
+*.tbi
+*.tsv.gz
+filter_gwas.*/
+batch_af_test.*/
+sample_qc.*/
