@@ -1,6 +1,6 @@
 # wgs-gwasqc
 
-[![tests](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml/badge.svg)](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml)
+[![tests](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml/badge.svg)](https://github.com/nighpg/wgs-gwasqc/actions/workflows/tests.yml) [![license](https://img.shields.io/github/license/nighpg/wgs-gwasqc)](LICENSE)
 
 **English** | [日本語](README.ja.md)
 
