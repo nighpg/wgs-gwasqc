@@ -4,6 +4,7 @@
 usage: python3 tests/run_tests.py [-v] [-k PATTERN]       (from anywhere)
        KEEP_TEST_DATA=1 python3 tests/run_tests.py         (keep the temporary directory)
 """
+import collections
 import json
 import os
 import shutil
@@ -14,9 +15,13 @@ import unittest
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+from check_input_vcf import count_filters
+
 FILTER = os.path.join(ROOT, 'filter_gwas.py')
 BATCH = os.path.join(ROOT, 'batch_af_test_vcf.py')
 SAMPLE = os.path.join(ROOT, 'sample_qc.py')
+CHECK = os.path.join(ROOT, 'check_input_vcf.py')
 try:
     import numpy  # noqa: F401
     import pandas as pd
@@ -106,6 +111,78 @@ def tearDownModule():
 
 
 # ===========================================================================
+class CheckInputVCF(unittest.TestCase):
+    def test_plain_vcf(self):
+        path = f'{D}/sample/sample.vcf'
+        r = tool(CHECK, '-i', path)
+        self.assertIn('Sample count: 400', r.stdout)
+        self.assertIn('##contig=<ID=chrX,length=156040895>', r.stdout)
+        self.assertIn('##FORMAT=<ID=GT', r.stdout)
+        self.assertIn('##FORMAT=<ID=DP', r.stdout)
+        self.assertIn('missing FORMAT fields for genotype masking: GQ, AD', r.stderr)
+        self.assertIn('uncompressed VCF cannot be indexed', r.stderr)
+        self.assertFalse(os.path.exists(path + '.csi'))
+        self.assertFalse(os.path.exists(path + '.gz'))
+        expected = collections.Counter(sh('bcftools', 'query', '-f', '%FILTER\n', path).stdout.splitlines())
+        for label, count in expected.items():
+            self.assertIn(f'{count:7d} {label}', r.stdout)
+
+    def test_create_and_reuse_index(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            for extension, mode in (('vcf.gz', '-Oz'), ('bcf', '-Ob')):
+                with self.subTest(extension=extension):
+                    path = os.path.join(tmp, 'input.' + extension)
+                    sh('bcftools', 'view', f'{D}/basic/basic.vcf', mode, '-o', path)
+                    self.assertIn('Index: created', tool(CHECK, '-i', path).stdout)
+                    index = path + '.csi'
+                    before = os.stat(index).st_mtime_ns
+                    self.assertIn('Index: already exists', tool(CHECK, '-i', path).stdout)
+                    self.assertEqual(before, os.stat(index).st_mtime_ns)
+
+    def test_missing_input(self):
+        r = tool(CHECK, '-i', f'{D}/missing.vcf', check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('file not found', r.stderr)
+
+    def test_filter_limit(self):
+        path = f'{D}/basic/basic.vcf'
+        expected = collections.Counter(
+            sh('bcftools', 'query', '-f', '%FILTER\n', path).stdout.splitlines()[:10])
+        self.assertEqual(count_filters(path, limit=10), expected)
+
+    def test_million_record_limit(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            path = os.path.join(tmp, 'large.vcf')
+            with open(path, 'w') as f:
+                f.write('##fileformat=VCFv4.2\n'
+                        '##contig=<ID=chr1,length=50000000>\n'
+                        '##FILTER=<ID=LowQual,Description="Low quality">\n'
+                        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n')
+                block = 'chr1\t1\t.\tA\tG\t100\tPASS\t.\n' * 1000
+                for _ in range(1000):
+                    f.write(block)
+                f.write('chr1\t2\t.\tA\tG\t1\tLowQual\t.\n')
+            r = tool(CHECK, '-i', path)
+            self.assertIn('inspected 1000000', r.stdout)
+            self.assertIn('1000000 PASS', r.stdout)
+            self.assertNotIn('LowQual', r.stdout)
+
+    def test_missing_contig_length(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            path = os.path.join(tmp, 'input.vcf')
+            write(path, read(f'{D}/basic/basic.vcf').replace(',length=50000000', ''))
+            r = tool(CHECK, '-i', path)
+            self.assertIn('contig length missing or invalid', r.stderr)
+
+    def test_invalid_input(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            path = os.path.join(tmp, 'invalid.vcf')
+            write(path, 'not a VCF\n')
+            r = tool(CHECK, '-i', path, check=False)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('bcftools failed', r.stderr)
+
+
 class FilterBasic(unittest.TestCase):
     """filter_gwas.py: each criterion and input mode"""
 

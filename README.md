@@ -15,6 +15,7 @@ Batch differences that remain are handled in the GWAS model (batch covariate, PC
 
 | Script | Role | Requires |
 |---|---|---|
+| `check_input_vcf.py` | **Input check.** Sample count, contig lengths, FORMAT fields, FILTER counts and missing index creation | bcftools, Python standard library |
 | `filter_gwas.py` | **Site filter.** Adds one FILTER label per criterion and writes the sites that pass all of them | bcftools, Python standard library |
 | `batch_af_test_vcf.py` | **Site-level diagnostics.** AF difference, missingness difference and HWE between batches; λGC by frequency band | bcftools, numpy, pandas, scipy |
 | `sample_qc.py` | **Sample-level diagnostics.** Per-sample variant counts, Ti/Tv, het/hom ratio, singletons, etc. compared between batches; outliers and sex mismatches | bcftools, numpy, pandas, scipy |
@@ -30,6 +31,42 @@ Batch differences that remain are handled in the GWAS model (batch covariate, PC
 | numpy / pandas / scipy | 1.26 / 2.1 / 1.11 | only for `batch_af_test_vcf.py` and `sample_qc.py` |
 
 No installation is needed: clone the repository and run the scripts directly (`bcftools` must be on `PATH`).
+
+Check an input VCF/BCF before QC:
+
+```sh
+singularity exec wgs-gwasqc.sif python3 check_input_vcf.py -i testdata/sample/sample.vcf
+```
+
+The script prints the sample count, first three contig headers, FORMAT headers and FILTER counts
+for up to the first 1,000,000 records. Missing contig lengths or GT/GQ/DP/AD fields produce warnings.
+It creates a missing index for BGZF VCF/BCF; uncompressed VCF produces a warning and is not modified.
+Check the FILTER counts yourself: they do not prove that VQSR was applied.
+The command above runs the host script, so an existing image can be used without rebuilding it.
+
+## Singularity / Apptainer
+
+Build the image from the repository root:
+
+```sh
+apptainer build wgs-gwasqc.sif Singularity.def
+```
+
+The image includes the scripts, tests, bcftools, PLINK 2, Python 3 and the numpy, pandas and scipy dependencies.
+Run a script by passing its command to the image:
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/filter_gwas.py --help
+apptainer run --bind "$PWD:/data" wgs-gwasqc.sif \
+  python3 /opt/wgs-gwasqc/batch_af_test_vcf.py -i /data/joint.bcf \
+  -S /data/groups.txt --batches BatchA,BatchB -o /data/qc/before
+```
+
+Bind input and output directories from the host as needed. To run the test suite:
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/tests/run_tests.py -v
+```
 
 ## Workflow
 

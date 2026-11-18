@@ -14,10 +14,11 @@ AF 差でサイトを除外すると、表現型や祖先と関連する本物�
 
 | スクリプト | 役割 | 依存 |
 |---|---|---|
+| `check_input_vcf.py` | **入力確認**。サンプル数、contig 長、FORMAT、FILTER 内訳、index がなければ作成 | bcftools, Python 標準ライブラリ |
 | `filter_gwas.py` | **サイトフィルタ**。各基準を FILTER ラベルとして付け、全基準を通ったサイトを出力する | bcftools, Python 標準ライブラリ |
 | `batch_af_test_vcf.py` | **サイト単位の診断**。バッチ間の AF 差・欠測差・HWE と、頻度帯ごとの λGC | bcftools, numpy, pandas, scipy |
 | `sample_qc.py` | **サンプル単位の診断**。1 人あたりの変異数・Ti/Tv・ヘテロ/ホモ比・singleton などをバッチ間で比較、外れ値と性別不一致を検出 | bcftools, numpy, pandas, scipy |
-| `gwasqc_common.py` | 上の 3 つが共通で使うモジュール (同じディレクトリに置く) | — |
+| `gwasqc_common.py` | 上のスクリプトが共通で使うモジュール (同じディレクトリに置く) | — |
 
 ## 動作環境
 
@@ -29,6 +30,42 @@ AF 差でサイトを除外すると、表現型や祖先と関連する本物�
 | numpy / pandas / scipy | 1.26 / 2.1 / 1.11 | `batch_af_test_vcf.py`, `sample_qc.py` のみ |
 
 インストールは不要です。リポジトリを clone し、スクリプトを直接実行してください (`bcftools` に PATH を通しておく)。
+
+QC 前に入力 VCF/BCF を確認できます。
+
+```sh
+singularity exec wgs-gwasqc.sif python3 check_input_vcf.py -i testdata/sample/sample.vcf
+```
+
+サンプル数、先頭 3 件の contig ヘッダー、FORMAT ヘッダー、先頭最大 100 万レコードの FILTER 内訳を表示します。
+contig 長や GT/GQ/DP/AD が欠けている場合は警告します。
+BGZF 圧縮 VCF/BCF に index がなければ作成します。未圧縮 VCF は警告のみとし、元ファイルは変更しません。
+FILTER 内訳だけでは VQSR 適用の有無を断定できないので、内容を確認してください。
+上記はホスト側のスクリプトを実行するため、既存イメージを再ビルドせずに利用できます。
+
+## Singularity / Apptainer
+
+リポジトリのルートでイメージをビルドします。
+
+```sh
+apptainer build wgs-gwasqc.sif Singularity.def
+```
+
+イメージにはスクリプト、テスト、bcftools、PLINK 2、Python 3、numpy / pandas / scipy が含まれます。
+イメージにコマンドを渡して各スクリプトを実行できます。
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/filter_gwas.py --help
+apptainer run --bind "$PWD:/data" wgs-gwasqc.sif \
+  python3 /opt/wgs-gwasqc/batch_af_test_vcf.py -i /data/joint.bcf \
+  -S /data/groups.txt --batches BatchA,BatchB -o /data/qc/before
+```
+
+必要に応じてホストの入力・出力ディレクトリを bind してください。テストスイートは次のように実行します。
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/tests/run_tests.py -v
+```
 
 ## 基本の流れ
 

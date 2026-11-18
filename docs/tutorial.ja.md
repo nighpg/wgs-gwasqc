@@ -52,9 +52,19 @@ python3 -c "import numpy, pandas, scipy"   # 診断ツール (Step 4, 6, 7) に�
 python3 $TOOLS/tests/run_tests.py     # 動作確認 (合成データ, 十数秒)
 ```
 
-`plink2` (Step 8) と GWAS のツール (Step 9) は別途用意してください。
+この Singularity / Apptainer イメージには `plink2` が含まれます。コンテナを使わない場合は `plink2` を別途用意してください。GWAS のツール (Step 9) は別途用意してください。
 
 ## Step 1. 入力 VCF の確認
+
+次のスクリプトで、下記の確認と index の作成をまとめて実行できます。
+未圧縮 VCF は index を作れないため、警告のみ表示し元ファイルは変更しません。
+FORMAT の不足や contig 長の欠落も警告します。
+
+```bash
+singularity exec wgs-gwasqc.sif python3 $TOOLS/check_input_vcf.py -i "$VCF"
+```
+
+個別に確認する場合:
 
 ```bash
 # サンプル数
