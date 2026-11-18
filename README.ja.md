@@ -18,6 +18,7 @@ AF 差でサイトを除外すると、表現型や祖先と関連する本物�
 | `filter_gwas.py` | **サイトフィルタ**。各基準を FILTER ラベルとして付け、全基準を通ったサイトを出力する | bcftools, Python 標準ライブラリ |
 | `batch_af_test_vcf.py` | **サイト単位の診断**。バッチ間の AF 差・欠測差・HWE と、頻度帯ごとの λGC | bcftools, numpy, pandas, scipy |
 | `sample_qc.py` | **サンプル単位の診断**。1 人あたりの変異数・Ti/Tv・ヘテロ/ホモ比・singleton などをバッチ間で比較、外れ値と性別不一致を検出 | bcftools, numpy, pandas, scipy |
+| `plot_batch_effect.py` | **補正前後の可視化**。`batch_af_test_vcf.py` の診断結果を染色体イデオグラム (G バンド・セントロメア・テロメア) 上にプロットし、バッチエフェクトQC不合格サイトが補正前後でどう変わったかを示す | numpy, pandas, matplotlib |
 | `gwasqc_common.py` | 上のスクリプトが共通で使うモジュール (同じディレクトリに置く) | — |
 
 ## 動作環境
@@ -43,15 +44,49 @@ BGZF 圧縮 VCF/BCF に index がなければ作成します。未圧縮 VCF は
 FILTER 内訳だけでは VQSR 適用の有無を断定できないので、内容を確認してください。
 上記はホスト側のスクリプトを実行するため、既存イメージを再ビルドせずに利用できます。
 
+補正前後の `batch_af_test_vcf.py` 診断結果を、染色体ごとに1枚のPNG (UCSC `cytoBandIdeo` hg38 のイデオグラム付き) で可視化できます。
+
+UCSC のイデオグラムデータは Git 管理外です。Singularity イメージのビルド前に既定の場所へダウンロードしてください。
+別の場所に置く場合は、実行時に `--cytoband` で指定できます。
+
+```sh
+mkdir -p data
+curl -L https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/cytoBandIdeo.txt.gz \
+  -o data/cytoBandIdeo.hg38.txt.gz
+```
+
+```sh
+singularity exec wgs-gwasqc.sif python3 plot_batch_effect.py \
+  --before qc/before.tsv.gz --after qc/after.tsv.gz -o qc/ideogram
+```
+
+各PNGは、イデオグラム (Gバンド・セントロメア・テロメア) の下に、指標ごとに「補正前」「補正後」の2行1組のトラックが並びます。
+各組には大きな指標名ラベルを1つだけ付けて、Before/Afterが1セットだと分かるようにしています。
+各窓は折れ線ではなく点としてそのままプロットし、Before/Afterで同じY軸範囲を使うので、ノイジーだったものが落ち着く様子を比較できます。
+`AF` は `--batches` の各グループのアレル頻度 (窓内の中央値) をグループごとに色分けして表示します。ちょうど2グループのときは
+2番目のグループだけ表示を反転し、ゼロ線をはさんで下向きに伸びるようにして両グループを一目で比較できるようにしています
+(保存される値は変えず、表示だけ反転します)。ただし反転表示の2点間のギャップは実は両グループのAFの「合計」を表してしまい、
+差の大小そのものは分かりにくいため、同じパネルに `dAF` (実際の差、正なら `--batches` の先頭グループの値が高く、負なら
+2番目グループが高いことを示す) を折れ線で重ねて表示します。右側の専用Y軸は `AF` とまったく同じ範囲を共有しているので
+(軸を別々に独立してスケールすると dAF の実際の大きさが誇張されて見えてしまうため)、dAF の線が AF に対してどれくらい
+小さいか/大きいかがそのまま正直に伝わります。
+`dMISS`/`P_batch` も窓内の中央値 (符号維持)、`HWE`/`ExcHet` のp値は窓内の最小値 (つまり窓で最も悪いサイト) です。
+`P_batch` は診断専用で、AF由来のシグナルが補正前後で変わらないことを確認するためのものです。
+いずれも値そのものへの二次加工はせず、p値のトラックだけY軸を対数スケールにしています。
+`AF`/`HWE`/`ExcHet` は、`batch_af_test_vcf.py` 実行時の `--batches`/`--hwe-groups` のグループごとに色分けして凡例付きで重ねて表示します
+(診断tsvにグループ別の生データがあるため。同じグループ名はどのトラックでも同じ色になります)。`dAF`/`dMISS`/`P_batch` はすでに差分・プールされた検定値でグループ別の生データが無いため、従来どおり1系列のままです。
+`--window-mb` で集計窓のサイズ (既定 0.01Mb = 10kb) を変更できます。
+
 ## Singularity / Apptainer
 
 リポジトリのルートでイメージをビルドします。
 
 ```sh
+# 先に data/cytoBandIdeo.hg38.txt.gz を配置してください (上記参照)。
 apptainer build wgs-gwasqc.sif Singularity.def
 ```
 
-イメージにはスクリプト、テスト、bcftools、PLINK 2、Python 3、numpy / pandas / scipy が含まれます。
+イメージにはスクリプト、テスト、bcftools、PLINK 2、Python 3、numpy / pandas / scipy / matplotlib が含まれます。
 イメージにコマンドを渡して各スクリプトを実行できます。
 
 ```sh

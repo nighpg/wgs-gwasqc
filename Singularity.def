@@ -6,6 +6,7 @@ From: ubuntu:24.04
 
 %files
     check_input_vcf.py /opt/wgs-gwasqc/
+    plot_batch_effect.py /opt/wgs-gwasqc/
     batch_af_test_vcf.py /opt/wgs-gwasqc/
     filter_gwas.py /opt/wgs-gwasqc/
     gwasqc_common.py /opt/wgs-gwasqc/
@@ -13,6 +14,7 @@ From: ubuntu:24.04
     LICENSE /opt/wgs-gwasqc/
     README.md /opt/wgs-gwasqc/
     README.ja.md /opt/wgs-gwasqc/
+    data /opt/wgs-gwasqc/data
     docs /opt/wgs-gwasqc/docs
     tests /opt/wgs-gwasqc/tests
 
@@ -26,6 +28,7 @@ From: ubuntu:24.04
         gzip \
         plink2 \
         python3 \
+        python3-matplotlib \
         python3-numpy \
         python3-pandas \
         python3-scipy \
@@ -34,7 +37,7 @@ From: ubuntu:24.04
 
     bcftools --version | head -n 2
     plink2 --version
-    python3 -c "import numpy, pandas, scipy"
+    python3 -c "import matplotlib, numpy, pandas, scipy"
 
 %environment
     export PATH="/opt/wgs-gwasqc:$PATH"

@@ -19,6 +19,7 @@ Batch differences that remain are handled in the GWAS model (batch covariate, PC
 | `filter_gwas.py` | **Site filter.** Adds one FILTER label per criterion and writes the sites that pass all of them | bcftools, Python standard library |
 | `batch_af_test_vcf.py` | **Site-level diagnostics.** AF difference, missingness difference and HWE between batches; λGC by frequency band | bcftools, numpy, pandas, scipy |
 | `sample_qc.py` | **Sample-level diagnostics.** Per-sample variant counts, Ti/Tv, het/hom ratio, singletons, etc. compared between batches; outliers and sex mismatches | bcftools, numpy, pandas, scipy |
+| `plot_batch_effect.py` | **Before/after visualization.** Plots `batch_af_test_vcf.py` diagnostics on a chromosome ideogram (G-bands, centromere, telomeres) to show where batch-effect QC failures were before vs. after filtering | numpy, pandas, matplotlib |
 | `gwasqc_common.py` | Shared module used by the three scripts (keep it in the same directory) | — |
 
 ## Requirements
@@ -44,15 +45,53 @@ It creates a missing index for BGZF VCF/BCF; uncompressed VCF produces a warning
 Check the FILTER counts yourself: they do not prove that VQSR was applied.
 The command above runs the host script, so an existing image can be used without rebuilding it.
 
+Visualize before/after batch-effect QC (one PNG per chromosome, with `batch_af_test_vcf.py` diagnostics
+plotted on a UCSC `cytoBandIdeo` (hg38) ideogram):
+
+The UCSC ideogram data is not tracked in Git. Download it to the default path before building the
+Singularity image, or specify another path with `--cytoband` when running the script:
+
+```sh
+mkdir -p data
+curl -L https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/cytoBandIdeo.txt.gz \
+  -o data/cytoBandIdeo.hg38.txt.gz
+```
+
+```sh
+singularity exec wgs-gwasqc.sif python3 plot_batch_effect.py \
+  --before qc/before.tsv.gz --after qc/after.tsv.gz -o qc/ideogram
+```
+
+Each PNG shows the ideogram (G-bands, centromere, telomeres), then one Before/After pair of tracks per
+metric (`AF` with `dAF` overlaid, `dMISS`, `HWE` p, `ExcHet` p, `P_batch` p), each pair labelled once with
+a large shared title so Before and After are easy to compare as a set. Each window is plotted as a point
+(not a line) at its own value, with the same Y-axis range for Before and After so noisy-before/calm-after
+changes are comparable. `AF` plots each `--batches` group's allele frequency (window median) in its own
+color; when there are exactly two groups, the second group is mirrored below zero so both groups can be
+compared at a glance (the stored value is unchanged, only the display is flipped). Because the gap
+between the two mirrored `AF` points reflects their sum rather than their difference, `dAF` (the actual
+signed difference: positive means the first `--batches` group has the higher value, negative means the
+second group does) is overlaid on the same panel as a line on a secondary Y-axis that shares the exact
+same range as `AF`, so its true (usually much smaller) magnitude relative to `AF` stays honest rather than
+being independently rescaled to fill the panel. `dMISS`/`P_batch` are also the window median (signed),
+and `HWE`/`ExcHet` p is the window minimum (i.e. the worst site in the window). No value is otherwise
+transformed; only the p-value Y-axes use a log scale. `AF`, `HWE` and `ExcHet` are plotted per group (the
+`--batches`/`--hwe-groups` used when running `batch_af_test_vcf.py`), each in its own color with a legend
+(the same group name keeps the same color across tracks), since their raw values exist per group in the
+diagnostics file; `dAF`, `dMISS` and `P_batch` have no per-group raw value (they are already a difference
+or a pooled test), so they stay as a single series.
+Use `--window-mb` to change the aggregation window (default 0.01 Mb = 10 kb).
+
 ## Singularity / Apptainer
 
 Build the image from the repository root:
 
 ```sh
+# Ensure data/cytoBandIdeo.hg38.txt.gz is present first (see above).
 apptainer build wgs-gwasqc.sif Singularity.def
 ```
 
-The image includes the scripts, tests, bcftools, PLINK 2, Python 3 and the numpy, pandas and scipy dependencies.
+The image includes the scripts, tests, bcftools, PLINK 2, Python 3 and the numpy, pandas, scipy and matplotlib dependencies.
 Run a script by passing its command to the image:
 
 ```sh

@@ -28,6 +28,7 @@ NovaSeq 6000 と NovaSeq X Plus で読んだサンプルが混ざった WGS コ�
 | 4 | QC 前の診断 | `batch_af_test_vcf.py` |
 | 5 | サイトフィルタ | `filter_gwas.py` |
 | 6 | QC 後の診断 | `batch_af_test_vcf.py` |
+| 6.5 | 補正前後の可視化 (任意) | `plot_batch_effect.py` |
 | 7 | サンプル QC (必要なら除外して Step 5 から再実行) | `sample_qc.py` |
 | 8 | PCA でバッチの分離が消えたか確認 | plink2 |
 | 9 | GWAS と有意サイトの事後確認 | REGENIE / SAIGE など |
@@ -272,6 +273,23 @@ Step 5 で遺伝型はマスク済みなので `--no-gt-filter` を付けます�
 - `batch_af(all)` (全サイト = QC 後のサイト) が Step 4 の `batch_af(all)` より大きく下がっているか
 - 残った AF 差のあるサイトが特定の領域に固まっていないか (`qc/after.tsv.gz` の `flag_batch_af` を染色体・位置で集計)。固まっていれば、その領域をマスクに追加して Step 5 をやり直す
 - `lambda` が 1 に近づいたか。1.1-1.2 程度の上昇が頻度帯によらず均一に残る場合は、サイトを削らず Step 8・9 で扱う
+
+## Step 6.5. 補正前後の可視化 (任意)
+
+Step 4 と Step 6 で作った2つの `.tsv.gz` を、染色体イデオグラム (Gバンド・セントロメア・テロメア) 上に重ねて比較できます。
+
+```bash
+singularity exec wgs-gwasqc.sif python3 $TOOLS/plot_batch_effect.py \
+    --before qc/before.tsv.gz --after qc/after.tsv.gz -o qc/ideogram
+```
+
+染色体ごとに1枚のPNG (`qc/ideogram/chr1.png` など) ができます。イデオグラムの下に、指標ごとに
+「補正前」「補正後」の2行1組 (大きな指標名ラベル付き) が並び、各窓を点でそのままプロットします。
+`AF` はバッチごとに色分けして表示し (2バッチなら2番目を下向きに反転)、同じパネルに `dAF` (実際の差)
+を折れ線で重ねて確認できます (右軸はAFと同じ範囲を共有するので、差の実際の大きさが誇張されません)。
+`dMISS` や `HWE`/`ExcHet` のp値が補正前はノイジーで補正後は落ち着いていること、そして `dAF`/`P_batch`
+(AF差, 診断専用) はほぼ変化していないことを、染色体の位置と対応づけて確認できます。
+Step 6 で述べた「残った AF 差のあるサイトが特定の領域に固まっていないか」の確認にも使えます。
 
 ## Step 7. サンプル QC
 
