@@ -62,6 +62,12 @@ singularity exec wgs-gwasqc.sif python3 plot_batch_effect.py \
   --before qc/before.tsv.gz --after qc/after.tsv.gz -o qc/ideogram
 ```
 
+Example output (synthetic data from `tests/generate_plot_demo_vcf.py`, with a planted AF difference +
+missingness-rate difference in one region and heterozygosity-excess noise spread across the rest; both
+disappear after correction):
+
+![plot_batch_effect.py example output](docs/images/plot_batch_effect_example.png)
+
 Each PNG shows the ideogram (G-bands, centromere, telomeres), then one Before/After pair of tracks per
 metric (`AF` with `dAF` overlaid, `dMISS`, `HWE` p, `ExcHet` p, `P_batch` p), each pair labelled once with
 a large shared title so Before and After are easy to compare as a set. Each window is plotted as a point
@@ -358,6 +364,15 @@ Tests with synthetic data (generated with the Python standard library and fixed 
 ```bash
 python3 tests/run_tests.py -v                 # needs bcftools; diagnostic-tool tests are skipped without numpy/pandas/scipy
 KEEP_TEST_DATA=1 python3 tests/run_tests.py   # keep the generated data and outputs
+```
+
+`tests/generate_plot_demo_vcf.py` builds a synthetic VCF for making sample images of `plot_batch_effect.py`
+(chr22 p-arm, with a planted batch AF difference and heterozygosity-excess noise), then runs
+`batch_af_test_vcf.py` / `filter_gwas.py` / `plot_batch_effect.py` end to end (needs numpy and a
+Singularity container with bcftools etc.).
+
+```bash
+singularity exec wgs-gwasqc.sif python3 tests/generate_plot_demo_vcf.py demo_out
 ```
 
 They check: the outcome of each criterion at planted sites, that AF differences are not used, agreement between

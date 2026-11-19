@@ -60,6 +60,11 @@ singularity exec wgs-gwasqc.sif python3 plot_batch_effect.py \
   --before qc/before.tsv.gz --after qc/after.tsv.gz -o qc/ideogram
 ```
 
+出力例 (`tests/generate_plot_demo_vcf.py` で作った合成データ。特定領域のAF差+欠測率差と、全体に薄く広がる
+ヘテロ過剰ノイズを仕込んであり、どちらも補正後に消えている):
+
+![plot_batch_effect.py の出力例](docs/images/plot_batch_effect_example.png)
+
 各PNGは、イデオグラム (Gバンド・セントロメア・テロメア) の下に、指標ごとに「補正前」「補正後」の2行1組のトラックが並びます。
 各組には大きな指標名ラベルを1つだけ付けて、Before/Afterが1セットだと分かるようにしています。
 各窓は折れ線ではなく点としてそのままプロットし、Before/Afterで同じY軸範囲を使うので、ノイジーだったものが落ち着く様子を比較できます。
@@ -324,6 +329,14 @@ GATK の joint call では低品質の遺伝型も `0/0` や `0/1` のまま残�
 ```bash
 python3 tests/run_tests.py -v                 # bcftools が必要。診断ツールのテストは numpy/pandas/scipy が無ければ省略
 KEEP_TEST_DATA=1 python3 tests/run_tests.py   # 生成したデータと出力を残す
+```
+
+`tests/generate_plot_demo_vcf.py` は、`plot_batch_effect.py` の見本画像を作るための合成VCF (chr22短腕、
+バッチ間の AF 差とヘテロ過剰ノイズを仕込んだもの) を生成し、`batch_af_test_vcf.py` / `filter_gwas.py` /
+`plot_batch_effect.py` を一括実行します (numpy と、bcftools 等を含む Singularity コンテナが必要)。
+
+```bash
+singularity exec wgs-gwasqc.sif python3 tests/generate_plot_demo_vcf.py demo_out
 ```
 
 確認している内容: 各基準の判定 (仕込んだサイトごと)、AF 差を判定に使わないこと、入力モード間 (`-i` / `-I` / `--no-chunk`) の一致、
