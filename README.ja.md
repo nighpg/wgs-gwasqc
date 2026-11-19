@@ -14,10 +14,12 @@ AF 差でサイトを除外すると、表現型や祖先と関連する本物�
 
 | スクリプト | 役割 | 依存 |
 |---|---|---|
+| `check_input_vcf.py` | **入力確認**。サンプル数、contig 長、FORMAT、FILTER 内訳、index がなければ作成 | bcftools, Python 標準ライブラリ |
 | `filter_gwas.py` | **サイトフィルタ**。各基準を FILTER ラベルとして付け、全基準を通ったサイトを出力する | bcftools, Python 標準ライブラリ |
 | `batch_af_test_vcf.py` | **サイト単位の診断**。バッチ間の AF 差・欠測差・HWE と、頻度帯ごとの λGC | bcftools, numpy, pandas, scipy |
 | `sample_qc.py` | **サンプル単位の診断**。1 人あたりの変異数・Ti/Tv・ヘテロ/ホモ比・singleton などをバッチ間で比較、外れ値と性別不一致を検出 | bcftools, numpy, pandas, scipy |
-| `gwasqc_common.py` | 上の 3 つが共通で使うモジュール (同じディレクトリに置く) | — |
+| `plot_batch_effect.py` | **補正前後の可視化**。`batch_af_test_vcf.py` の診断結果を染色体イデオグラム (G バンド・セントロメア・テロメア) 上にプロットし、バッチエフェクトQC不合格サイトが補正前後でどう変わったかを示す | numpy, pandas, matplotlib |
+| `gwasqc_common.py` | 上のスクリプトが共通で使うモジュール (同じディレクトリに置く) | — |
 
 ## 動作環境
 
@@ -29,6 +31,80 @@ AF 差でサイトを除外すると、表現型や祖先と関連する本物�
 | numpy / pandas / scipy | 1.26 / 2.1 / 1.11 | `batch_af_test_vcf.py`, `sample_qc.py` のみ |
 
 インストールは不要です。リポジトリを clone し、スクリプトを直接実行してください (`bcftools` に PATH を通しておく)。
+
+QC 前に入力 VCF/BCF を確認できます。
+
+```sh
+singularity exec wgs-gwasqc.sif python3 check_input_vcf.py -i testdata/sample/sample.vcf
+```
+
+サンプル数、先頭 3 件の contig ヘッダー、FORMAT ヘッダー、先頭最大 100 万レコードの FILTER 内訳を表示します。
+contig 長や GT/GQ/DP/AD が欠けている場合は警告します。
+BGZF 圧縮 VCF/BCF に index がなければ作成します。未圧縮 VCF は警告のみとし、元ファイルは変更しません。
+FILTER 内訳だけでは VQSR 適用の有無を断定できないので、内容を確認してください。
+上記はホスト側のスクリプトを実行するため、既存イメージを再ビルドせずに利用できます。
+
+補正前後の `batch_af_test_vcf.py` 診断結果を、染色体ごとに1枚のPNG (UCSC `cytoBandIdeo` hg38 のイデオグラム付き) で可視化できます。
+
+UCSC のイデオグラムデータは Git 管理外です。Singularity イメージのビルド前に既定の場所へダウンロードしてください。
+別の場所に置く場合は、実行時に `--cytoband` で指定できます。
+
+```sh
+mkdir -p data
+curl -L https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/cytoBandIdeo.txt.gz \
+  -o data/cytoBandIdeo.hg38.txt.gz
+```
+
+```sh
+singularity exec wgs-gwasqc.sif python3 plot_batch_effect.py \
+  --before qc/before.tsv.gz --after qc/after.tsv.gz -o qc/ideogram
+```
+
+出力例 (`tests/generate_plot_demo_vcf.py` で作った合成データ。特定領域のAF差+欠測率差と、全体に薄く広がる
+ヘテロ過剰ノイズを仕込んであり、どちらも補正後に消えている):
+
+![plot_batch_effect.py の出力例](docs/images/plot_batch_effect_example.png)
+
+**この図からわかること**
+
+このツールは、バッチ間のアレル頻度（AF）の差で単純に除外するのではなく、**HWE・ヘテロ過剰（ExcHet）・欠測率**といった品質の指標を使って、解析に使うサイトや領域を絞り込みます。
+
+- **補正前（Before）**: セントロメア周辺などでは、シーケンサーや解析条件の違いによって見かけの差（ノイズ）が出やすくなります。どのあたりでバッチ間の差や p 値の乱れが出ているかを図から確認できます。
+- **補正後（After）**: 品質指標にもとづいて問題のあるサイトや領域を取り除くと、ノイズが落ち着きます。その結果、バッチの違いによる偽のシグナルに惑わされず、2つのバッチに共通する本当に有意な変異だけを検出しやすくなります。
+
+**グラフの見方・主なオプション**
+
+- **全体の構成**: 一番上が染色体の図（イデオグラム）、その下に各指標の **Before / After** が上下セットで並びます。上下で縦軸の範囲をそろえているため、変化をそのまま比べられます。
+- **AF / dAF**: バッチごとのアレル頻度を色分けして点で表示します（2バッチの場合は2番目を下向きに表示）。2バッチ間の差（`dAF`）は右軸の折れ線で重ねて表示します。
+- **dMISS**: バッチ間の欠測率の差を表示します。
+- **P_batch / HWE / ExcHet**: p 値を対数スケールで表示します。点線は基準値です（`P_batch` は確認用で、フィルタの条件には使いません）。
+- **色分け**: `AF`・`HWE`・`ExcHet` はグループごとに同じ色で表示されます。
+- **`--window-mb`**: 集計する幅（窓サイズ）を指定します。既定は `1e-6`（1 bp = まとめずに全サイトを表示）です。ゲノム全体などで点が多すぎて重い場合は `--window-mb 0.01`（10 kb）のように指定してください。
+
+## Singularity / Apptainer
+
+リポジトリのルートでイメージをビルドします。
+
+```sh
+# 先に data/cytoBandIdeo.hg38.txt.gz を配置してください (上記参照)。
+apptainer build wgs-gwasqc.sif Singularity.def
+```
+
+イメージにはスクリプト、テスト、bcftools、PLINK 2、Python 3、numpy / pandas / scipy / matplotlib が含まれます。
+イメージにコマンドを渡して各スクリプトを実行できます。
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/filter_gwas.py --help
+apptainer run --bind "$PWD:/data" wgs-gwasqc.sif \
+  python3 /opt/wgs-gwasqc/batch_af_test_vcf.py -i /data/joint.bcf \
+  -S /data/groups.txt --batches BatchA,BatchB -o /data/qc/before
+```
+
+必要に応じてホストの入力・出力ディレクトリを bind してください。テストスイートは次のように実行します。
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/tests/run_tests.py -v
+```
 
 ## 基本の流れ
 
@@ -252,6 +328,14 @@ GATK の joint call では低品質の遺伝型も `0/0` や `0/1` のまま残�
 ```bash
 python3 tests/run_tests.py -v                 # bcftools が必要。診断ツールのテストは numpy/pandas/scipy が無ければ省略
 KEEP_TEST_DATA=1 python3 tests/run_tests.py   # 生成したデータと出力を残す
+```
+
+`tests/generate_plot_demo_vcf.py` は、`plot_batch_effect.py` の見本画像を作るための合成VCF (chr22短腕、
+バッチ間の AF 差とヘテロ過剰ノイズを仕込んだもの) を生成し、`batch_af_test_vcf.py` / `filter_gwas.py` /
+`plot_batch_effect.py` を一括実行します (numpy と、bcftools 等を含む Singularity コンテナが必要)。
+
+```bash
+singularity exec wgs-gwasqc.sif python3 tests/generate_plot_demo_vcf.py demo_out
 ```
 
 確認している内容: 各基準の判定 (仕込んだサイトごと)、AF 差を判定に使わないこと、入力モード間 (`-i` / `-I` / `--no-chunk`) の一致、

@@ -15,9 +15,11 @@ Batch differences that remain are handled in the GWAS model (batch covariate, PC
 
 | Script | Role | Requires |
 |---|---|---|
+| `check_input_vcf.py` | **Input check.** Sample count, contig lengths, FORMAT fields, FILTER counts and missing index creation | bcftools, Python standard library |
 | `filter_gwas.py` | **Site filter.** Adds one FILTER label per criterion and writes the sites that pass all of them | bcftools, Python standard library |
 | `batch_af_test_vcf.py` | **Site-level diagnostics.** AF difference, missingness difference and HWE between batches; λGC by frequency band | bcftools, numpy, pandas, scipy |
 | `sample_qc.py` | **Sample-level diagnostics.** Per-sample variant counts, Ti/Tv, het/hom ratio, singletons, etc. compared between batches; outliers and sex mismatches | bcftools, numpy, pandas, scipy |
+| `plot_batch_effect.py` | **Before/after visualization.** Plots `batch_af_test_vcf.py` diagnostics on a chromosome ideogram (G-bands, centromere, telomeres) to show where batch-effect QC failures were before vs. after filtering | numpy, pandas, matplotlib |
 | `gwasqc_common.py` | Shared module used by the three scripts (keep it in the same directory) | — |
 
 ## Requirements
@@ -30,6 +32,82 @@ Batch differences that remain are handled in the GWAS model (batch covariate, PC
 | numpy / pandas / scipy | 1.26 / 2.1 / 1.11 | only for `batch_af_test_vcf.py` and `sample_qc.py` |
 
 No installation is needed: clone the repository and run the scripts directly (`bcftools` must be on `PATH`).
+
+Check an input VCF/BCF before QC:
+
+```sh
+singularity exec wgs-gwasqc.sif python3 check_input_vcf.py -i testdata/sample/sample.vcf
+```
+
+The script prints the sample count, first three contig headers, FORMAT headers and FILTER counts
+for up to the first 1,000,000 records. Missing contig lengths or GT/GQ/DP/AD fields produce warnings.
+It creates a missing index for BGZF VCF/BCF; uncompressed VCF produces a warning and is not modified.
+Check the FILTER counts yourself: they do not prove that VQSR was applied.
+The command above runs the host script, so an existing image can be used without rebuilding it.
+
+Visualize before/after batch-effect QC (one PNG per chromosome, with `batch_af_test_vcf.py` diagnostics
+plotted on a UCSC `cytoBandIdeo` (hg38) ideogram):
+
+The UCSC ideogram data is not tracked in Git. Download it to the default path before building the
+Singularity image, or specify another path with `--cytoband` when running the script:
+
+```sh
+mkdir -p data
+curl -L https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/cytoBandIdeo.txt.gz \
+  -o data/cytoBandIdeo.hg38.txt.gz
+```
+
+```sh
+singularity exec wgs-gwasqc.sif python3 plot_batch_effect.py \
+  --before qc/before.tsv.gz --after qc/after.tsv.gz -o qc/ideogram
+```
+
+Example output (synthetic data from `tests/generate_plot_demo_vcf.py`, with a planted AF difference +
+missingness-rate difference in one region and heterozygosity-excess noise spread across the rest; both
+disappear after correction):
+
+![plot_batch_effect.py example output](docs/images/plot_batch_effect_example.png)
+
+**What this plot shows**
+
+Rather than filtering sites simply by allele frequency (AF) differences between batches, this tool selects sites and regions using quality metrics such as **HWE, heterozygosity excess (ExcHet), and missingness**.
+
+- **Before**: Around regions such as centromeres, differences in sequencers or processing conditions tend to produce apparent differences (noise). The plot helps check where batch differences or p-value disturbances occur.
+- **After**: Removing problematic sites and regions based on quality metrics calms the noise. This makes it easier to detect truly significant variants shared across both batches without being misled by false batch-driven signals.
+
+**Plot layout and main options**
+
+- **Layout**: The chromosome diagram (ideogram) is at the top, followed by paired **Before / After** tracks for each metric. Each pair shares the same Y-axis range so changes can be compared directly.
+- **AF / dAF**: Allele frequencies per batch are plotted as colored points (with two batches, the second batch is flipped downward). The difference between the two batches (`dAF`) is overlaid as a line on the right Y-axis.
+- **dMISS**: Missingness-rate difference between batches.
+- **P_batch / HWE / ExcHet**: p-values on a log scale, with dashed lines marking thresholds (`P_batch` is for diagnostics only and is not used for filtering).
+- **Colors**: `AF`, `HWE`, and `ExcHet` are colored consistently by group across tracks.
+- **`--window-mb`**: Aggregation window size (default `1e-6` = 1 bp, i.e. plot every site without aggregation). For genome-wide data with many points, pass e.g. `--window-mb 0.01` (10 kb) if rendering is slow.
+
+## Singularity / Apptainer
+
+Build the image from the repository root:
+
+```sh
+# Ensure data/cytoBandIdeo.hg38.txt.gz is present first (see above).
+apptainer build wgs-gwasqc.sif Singularity.def
+```
+
+The image includes the scripts, tests, bcftools, PLINK 2, Python 3 and the numpy, pandas, scipy and matplotlib dependencies.
+Run a script by passing its command to the image:
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/filter_gwas.py --help
+apptainer run --bind "$PWD:/data" wgs-gwasqc.sif \
+  python3 /opt/wgs-gwasqc/batch_af_test_vcf.py -i /data/joint.bcf \
+  -S /data/groups.txt --batches BatchA,BatchB -o /data/qc/before
+```
+
+Bind input and output directories from the host as needed. To run the test suite:
+
+```sh
+apptainer run wgs-gwasqc.sif python3 /opt/wgs-gwasqc/tests/run_tests.py -v
+```
 
 ## Workflow
 
@@ -282,6 +360,15 @@ Tests with synthetic data (generated with the Python standard library and fixed 
 ```bash
 python3 tests/run_tests.py -v                 # needs bcftools; diagnostic-tool tests are skipped without numpy/pandas/scipy
 KEEP_TEST_DATA=1 python3 tests/run_tests.py   # keep the generated data and outputs
+```
+
+`tests/generate_plot_demo_vcf.py` builds a synthetic VCF for making sample images of `plot_batch_effect.py`
+(chr22 p-arm, with a planted batch AF difference and heterozygosity-excess noise), then runs
+`batch_af_test_vcf.py` / `filter_gwas.py` / `plot_batch_effect.py` end to end (needs numpy and a
+Singularity container with bcftools etc.).
+
+```bash
+singularity exec wgs-gwasqc.sif python3 tests/generate_plot_demo_vcf.py demo_out
 ```
 
 They check: the outcome of each criterion at planted sites, that AF differences are not used, agreement between

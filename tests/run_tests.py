@@ -4,6 +4,7 @@
 usage: python3 tests/run_tests.py [-v] [-k PATTERN]       (from anywhere)
        KEEP_TEST_DATA=1 python3 tests/run_tests.py         (keep the temporary directory)
 """
+import collections
 import json
 import os
 import shutil
@@ -14,9 +15,14 @@ import unittest
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+from check_input_vcf import count_filters
+
 FILTER = os.path.join(ROOT, 'filter_gwas.py')
 BATCH = os.path.join(ROOT, 'batch_af_test_vcf.py')
 SAMPLE = os.path.join(ROOT, 'sample_qc.py')
+CHECK = os.path.join(ROOT, 'check_input_vcf.py')
+PLOT = os.path.join(ROOT, 'plot_batch_effect.py')
 try:
     import numpy  # noqa: F401
     import pandas as pd
@@ -25,6 +31,12 @@ try:
 except ImportError:
     HAVE_SCI = False
 need_sci = unittest.skipUnless(HAVE_SCI, 'numpy / pandas / scipy not installed')
+try:
+    import matplotlib  # noqa: F401
+    HAVE_MPL = True
+except ImportError:
+    HAVE_MPL = False
+need_mpl = unittest.skipUnless(HAVE_SCI and HAVE_MPL, 'numpy / pandas / scipy / matplotlib not installed')
 D = None   # data directory (set in setUpModule)
 
 
@@ -106,6 +118,78 @@ def tearDownModule():
 
 
 # ===========================================================================
+class CheckInputVCF(unittest.TestCase):
+    def test_plain_vcf(self):
+        path = f'{D}/sample/sample.vcf'
+        r = tool(CHECK, '-i', path)
+        self.assertIn('Sample count: 400', r.stdout)
+        self.assertIn('##contig=<ID=chrX,length=156040895>', r.stdout)
+        self.assertIn('##FORMAT=<ID=GT', r.stdout)
+        self.assertIn('##FORMAT=<ID=DP', r.stdout)
+        self.assertIn('missing FORMAT fields for genotype masking: GQ, AD', r.stderr)
+        self.assertIn('uncompressed VCF cannot be indexed', r.stderr)
+        self.assertFalse(os.path.exists(path + '.csi'))
+        self.assertFalse(os.path.exists(path + '.gz'))
+        expected = collections.Counter(sh('bcftools', 'query', '-f', '%FILTER\n', path).stdout.splitlines())
+        for label, count in expected.items():
+            self.assertIn(f'{count:7d} {label}', r.stdout)
+
+    def test_create_and_reuse_index(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            for extension, mode in (('vcf.gz', '-Oz'), ('bcf', '-Ob')):
+                with self.subTest(extension=extension):
+                    path = os.path.join(tmp, 'input.' + extension)
+                    sh('bcftools', 'view', f'{D}/basic/basic.vcf', mode, '-o', path)
+                    self.assertIn('Index: created', tool(CHECK, '-i', path).stdout)
+                    index = path + '.csi'
+                    before = os.stat(index).st_mtime_ns
+                    self.assertIn('Index: already exists', tool(CHECK, '-i', path).stdout)
+                    self.assertEqual(before, os.stat(index).st_mtime_ns)
+
+    def test_missing_input(self):
+        r = tool(CHECK, '-i', f'{D}/missing.vcf', check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('file not found', r.stderr)
+
+    def test_filter_limit(self):
+        path = f'{D}/basic/basic.vcf'
+        expected = collections.Counter(
+            sh('bcftools', 'query', '-f', '%FILTER\n', path).stdout.splitlines()[:10])
+        self.assertEqual(count_filters(path, limit=10), expected)
+
+    def test_million_record_limit(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            path = os.path.join(tmp, 'large.vcf')
+            with open(path, 'w') as f:
+                f.write('##fileformat=VCFv4.2\n'
+                        '##contig=<ID=chr1,length=50000000>\n'
+                        '##FILTER=<ID=LowQual,Description="Low quality">\n'
+                        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n')
+                block = 'chr1\t1\t.\tA\tG\t100\tPASS\t.\n' * 1000
+                for _ in range(1000):
+                    f.write(block)
+                f.write('chr1\t2\t.\tA\tG\t1\tLowQual\t.\n')
+            r = tool(CHECK, '-i', path)
+            self.assertIn('inspected 1000000', r.stdout)
+            self.assertIn('1000000 PASS', r.stdout)
+            self.assertNotIn('LowQual', r.stdout)
+
+    def test_missing_contig_length(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            path = os.path.join(tmp, 'input.vcf')
+            write(path, read(f'{D}/basic/basic.vcf').replace(',length=50000000', ''))
+            r = tool(CHECK, '-i', path)
+            self.assertIn('contig length missing or invalid', r.stderr)
+
+    def test_invalid_input(self):
+        with tempfile.TemporaryDirectory(prefix='check_input.') as tmp:
+            path = os.path.join(tmp, 'invalid.vcf')
+            write(path, 'not a VCF\n')
+            r = tool(CHECK, '-i', path, check=False)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('bcftools failed', r.stderr)
+
+
 class FilterBasic(unittest.TestCase):
     """filter_gwas.py: each criterion and input mode"""
 
@@ -306,6 +390,127 @@ class BatchTest(unittest.TestCase):
         b = f'{D}/basic'
         r = tool(BATCH, '-i', f'{b}/basic.bcf', '-S', f'{b}/groups.txt', '--batches', 'BatchA', '-o', f'{b}/out/z', check=False)
         self.assertNotEqual(r.returncode, 0)
+
+
+# ===========================================================================
+@need_mpl
+class PlotBatchEffect(unittest.TestCase):
+    """plot_batch_effect.py: before/after ideogram PNGs from batch_af_test_vcf.py diagnostics"""
+
+    @classmethod
+    def setUpClass(cls):
+        b = f'{D}/basic'
+        args = ['-S', f'{b}/groups.txt', '--batches', 'BatchA,BatchB']
+        tool(BATCH, '-i', f'{b}/basic.bcf', '-o', f'{b}/out/plot_before', *args)
+        tool(FILTER, '-i', f'{b}/basic.bcf', '-o', f'{b}/out/plot_filtered', *args)
+        tool(BATCH, '-i', f'{b}/out/plot_filtered.pass.bcf', '--no-gt-filter', '-o', f'{b}/out/plot_after', *args)
+        cls.before = f'{b}/out/plot_before.tsv.gz'
+        cls.after = f'{b}/out/plot_after.tsv.gz'
+        cls.mask_bed = f'{b}/mask.bed'   # basic() が生成する chr2:10000000-10100000 の BED
+
+    def test_creates_png_per_chromosome(self):
+        outdir = f'{D}/basic/out/ideogram'
+        tool(PLOT, '--before', self.before, '--after', self.after, '-o', outdir)
+        for chrom in ('chr1', 'chr2'):
+            path = os.path.join(outdir, f'{chrom}.png')
+            self.assertTrue(os.path.exists(path), path)
+            with open(path, 'rb') as f:
+                self.assertEqual(f.read(8), b'\x89PNG\r\n\x1a\n')   # PNG magic bytes
+            self.assertGreater(os.path.getsize(path), 10_000)
+
+    def test_window_mb_option(self):
+        outdir = f'{D}/basic/out/ideogram_10mb'
+        tool(PLOT, '--before', self.before, '--after', self.after, '-o', outdir, '--chroms', 'chr1', '--window-mb', '10')
+        self.assertTrue(os.path.exists(os.path.join(outdir, 'chr1.png')))
+
+    def test_read_mask_bed_parses_regions_and_skips_header_lines(self):
+        """read_mask_bed: filter_gwas.py の --mask と同じ BED 形式を読み、track/browser/# 行はスキップすること"""
+        from plot_batch_effect import read_mask_bed
+        bed = f'{D}/basic/out/_mask_with_header.bed'
+        write(bed, '\n'.join(['track name=mask', '# comment', 'chr1\t1000\t2000', 'chr2\t10000000\t10100000']) + '\n')
+        regions = read_mask_bed([bed])
+        self.assertEqual(regions, {'chr1': [(1000, 2000)], 'chr2': [(10000000, 10100000)]})
+
+    def test_read_mask_bed_merges_multiple_files(self):
+        """--mask を複数指定した場合、同じ染色体の区間が1つにまとめられること"""
+        from plot_batch_effect import read_mask_bed
+        bed_a = f'{D}/basic/out/_mask_a.bed'
+        bed_b = f'{D}/basic/out/_mask_b.bed'
+        write(bed_a, 'chr1\t1000\t2000\nchr2\t500\t600\n')
+        write(bed_b, 'chr1\t5000\t6000\n')
+        regions = read_mask_bed([bed_a, bed_b])
+        self.assertEqual(regions, {'chr1': [(1000, 2000), (5000, 6000)], 'chr2': [(500, 600)]})
+
+    def test_mask_option_adds_png_without_error(self):
+        """--mask を (複数回) 指定しても染色体ごとのPNGが作られること"""
+        outdir = f'{D}/basic/out/ideogram_mask'
+        tool(PLOT, '--before', self.before, '--after', self.after, '-o', outdir, '--chroms', 'chr1,chr2',
+             '--mask', self.mask_bed, '--mask', self.mask_bed)   # 複数指定できることも確認
+        for chrom in ('chr1', 'chr2'):
+            self.assertTrue(os.path.exists(os.path.join(outdir, f'{chrom}.png')))
+
+    def test_af_hwe_exchet_columns_are_per_group(self):
+        """AF/HWE/ExcHet はグループ (--batches) ごとの列をそのまま保持し、色分けに使えること"""
+        from plot_batch_effect import _metric_columns, group_colors
+        header = pd.read_csv(self.before, sep='\t', nrows=0).columns.tolist()
+        af_cols, hwe_cols, exchet_cols, _, daf_col = _metric_columns(header)
+        self.assertEqual(af_cols, ['AF_BatchA', 'AF_BatchB'])
+        self.assertEqual(hwe_cols, ['HWE_BatchA', 'HWE_BatchB'])
+        self.assertEqual(exchet_cols, ['ExcHet_BatchA', 'ExcHet_BatchB'])
+        self.assertEqual(daf_col, 'dAF')   # 2バッチなので符号付きの dAF 列がある
+        colors = group_colors(['BatchA', 'BatchB'])
+        self.assertNotEqual(colors['BatchA'], colors['BatchB'])
+
+    def test_af_track_uses_raw_value_unchanged(self):
+        """AF トラックは二次加工せず生の値をそのまま使うこと (1bp窓=集計なしで生データと一致することで確認)"""
+        from plot_batch_effect import load_window_stats
+        raw = pd.read_csv(self.before, sep='\t', usecols=['CHROM', 'POS', 'AF_BatchA', 'AF_BatchB'])
+        out, _, _, _ = load_window_stats(self.before, 1, lambda *x: None)
+        merged = out.merge(raw, left_on=['CHROM', 'window'], right_on=['CHROM', 'POS'], how='inner')
+        self.assertGreater(len(merged), 0)
+        for g in ('BatchA', 'BatchB'):
+            pd.testing.assert_series_equal(merged[f'af__{g}'].reset_index(drop=True),
+                                            merged[f'AF_{g}'].reset_index(drop=True), check_names=False,
+                                            check_dtype=False)
+
+    def test_daf_track_uses_raw_value_unchanged(self):
+        """dAF トラックは二次加工せず生の値をそのまま使うこと (1bp窓=集計なしで生データと一致することで確認)"""
+        from plot_batch_effect import load_window_stats
+        raw = pd.read_csv(self.before, sep='\t', usecols=['CHROM', 'POS', 'dAF'])
+        out, _, _, _ = load_window_stats(self.before, 1, lambda *x: None)
+        merged = out.merge(raw, left_on=['CHROM', 'window'], right_on=['CHROM', 'POS'], how='inner')
+        self.assertGreater(len(merged), 0)
+        pd.testing.assert_series_equal(merged['daf'].reset_index(drop=True),
+                                        merged['dAF'].reset_index(drop=True), check_names=False, check_dtype=False)
+
+    def test_af_plot_spec_mirrors_second_group_only_for_two_groups(self):
+        """AFトラックの表示向き: ちょうど2グループなら2番目を反転、それ以外は全て正の向き"""
+        from plot_batch_effect import af_plot_spec
+        self.assertEqual(af_plot_spec(['BatchA', 'BatchB']), [('BatchA', 1), ('BatchB', -1)])
+        self.assertEqual(af_plot_spec(['BatchA']), [('BatchA', 1)])
+        self.assertEqual(af_plot_spec(['BatchA', 'BatchB', 'BatchC']),
+                          [('BatchA', 1), ('BatchB', 1), ('BatchC', 1)])
+
+    def test_chromosome_without_data_is_skipped(self):
+        """複数指定した染色体のうち、データが無いものだけスキップして残りは描画する"""
+        outdir = f'{D}/basic/out/ideogram_chr5'
+        r = tool(PLOT, '--before', self.before, '--after', self.after, '-o', outdir, '--chroms', 'chr1,chr5')
+        self.assertIn('chr5: Before/After いずれにもデータがないためスキップ', r.stderr)
+        self.assertTrue(os.path.exists(os.path.join(outdir, 'chr1.png')))
+        self.assertFalse(os.path.exists(os.path.join(outdir, 'chr5.png')))
+
+    def test_no_matching_chromosome_fails(self):
+        """指定した染色体のどれも描画できない場合はエラーで終了する (chr5 のみ, データなし)"""
+        outdir = f'{D}/basic/out/ideogram_chr5_only'
+        r = tool(PLOT, '--before', self.before, '--after', self.after, '-o', outdir, '--chroms', 'chr5', check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('描画対象の染色体がありません', r.stderr)
+
+    def test_no_matching_chromosome_name_fails(self):
+        outdir = f'{D}/basic/out/ideogram_none'
+        r = tool(PLOT, '--before', self.before, '--after', self.after, '-o', outdir, '--chroms', 'chrNotReal', check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('描画対象の染色体がありません', r.stderr)
 
 
 # ===========================================================================

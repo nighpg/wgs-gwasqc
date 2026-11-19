@@ -1,0 +1,55 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%setup
+    mkdir -p "$SINGULARITY_ROOTFS/opt/wgs-gwasqc"
+
+%files
+    check_input_vcf.py /opt/wgs-gwasqc/
+    plot_batch_effect.py /opt/wgs-gwasqc/
+    batch_af_test_vcf.py /opt/wgs-gwasqc/
+    filter_gwas.py /opt/wgs-gwasqc/
+    gwasqc_common.py /opt/wgs-gwasqc/
+    sample_qc.py /opt/wgs-gwasqc/
+    LICENSE /opt/wgs-gwasqc/
+    README.md /opt/wgs-gwasqc/
+    README.ja.md /opt/wgs-gwasqc/
+    data /opt/wgs-gwasqc/data
+    docs /opt/wgs-gwasqc/docs
+    tests /opt/wgs-gwasqc/tests
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        bash \
+        bcftools \
+        coreutils \
+        gzip \
+        plink2 \
+        python3 \
+        python3-matplotlib \
+        python3-numpy \
+        python3-pandas \
+        python3-scipy \
+        sed
+    rm -rf /var/lib/apt/lists/*
+
+    bcftools --version | head -n 2
+    plink2 --version
+    python3 -c "import matplotlib, numpy, pandas, scipy"
+
+%environment
+    export PATH="/opt/wgs-gwasqc:$PATH"
+
+%test
+    plink2 --version
+    python3 /opt/wgs-gwasqc/tests/run_tests.py -v
+
+%runscript
+    if [ "$#" -eq 0 ]; then
+        echo "Usage: apptainer run <image.sif> <command> [args...]" >&2
+        echo "Example: apptainer run <image.sif> python3 /opt/wgs-gwasqc/filter_gwas.py --help" >&2
+        exit 2
+    fi
+    exec "$@"

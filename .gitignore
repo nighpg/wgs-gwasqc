@@ -6,6 +6,9 @@ __pycache__/
 *.vcf.gz
 *.tbi
 *.tsv.gz
+data/cytoBandIdeo.hg38.txt.gz
 filter_gwas.*/
 batch_af_test.*/
 sample_qc.*/
+testdata*/*
+*.sif
