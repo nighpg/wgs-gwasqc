@@ -80,7 +80,8 @@ singularity exec wgs-gwasqc.sif python3 plot_batch_effect.py \
 いずれも値そのものへの二次加工はせず、p値のトラックだけY軸を対数スケールにしています。
 `AF`/`HWE`/`ExcHet` は、`batch_af_test_vcf.py` 実行時の `--batches`/`--hwe-groups` のグループごとに色分けして凡例付きで重ねて表示します
 (診断tsvにグループ別の生データがあるため。同じグループ名はどのトラックでも同じ色になります)。`dAF`/`dMISS`/`P_batch` はすでに差分・プールされた検定値でグループ別の生データが無いため、従来どおり1系列のままです。
-`--window-mb` で集計窓のサイズ (既定 0.01Mb = 10kb) を変更できます。
+`--window-mb` で集計窓のサイズ (既定 1e-6 = 1bp、つまり集計なし) を変更できます。ゲノムワイドな実データでは、
+点が多すぎて重くなる場合に `--window-mb 0.01` (10kb) のように指定してください。
 
 ## Singularity / Apptainer
 

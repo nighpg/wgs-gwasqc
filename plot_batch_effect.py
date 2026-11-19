@@ -11,7 +11,8 @@
      HWE p / ExcHet p): AF/HWE/ExcHet はグループ (--batches / --hwe-groups) ごとに色分けして
      同じ軸に重ねる (同じグループ名はどのトラックでも同じ色)
 
-各トラックは --window-mb (既定 0.01Mb = 10kb) ごとに集計した生の値をそのまま使う (二次加工なし):
+各トラックは --window-mb (既定 1bp = 集計なし、生のサイト単位の値をそのままプロット) ごとに集計した
+生の値をそのまま使う (二次加工なし):
   AFはグループ (--batches で指定したシーケンサー・コホートなど) ごとの列 (AF_<group>) を窓内中央値に
   したものを、グループごとに別系列で点に打つ。ちょうど2グループ (通常のバッチエフェクト診断のケース) の
   ときは、2番目のグループだけ表示を反転し (y = -AF) ゼロ線をはさんで下向きに伸びるようにする (保存
@@ -313,14 +314,19 @@ def plot_chromosome(chrom, cyto, before, after, thresholds, window_mb, af_groups
                 ax.plot(x_mb, df[key], color=color, marker='o', markersize=2.5, markeredgewidth=0, linestyle='none')
             if scale == 'log':
                 ax.set_yscale('log')
+                # 通常の目盛りも "1e-06" 形式にし、点線の脇の数値と表記を揃える (既定は "10^-6" 形式で混在する)
+                ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _pos: f'{v:g}' if v > 0 else '0'))
             else:
                 ax.axhline(0, color='black', linewidth=0.5, linestyle=':')
             ax.set_ylim(*ylims[key])
             thr = thresholds.get(key)
             if thr is not None:
-                # 点線 = QCで使う基準線 (この値より悪い側がQC不合格になる境界)。凡例に値ごと示す
+                # 点線 = QCで使う基準線 (この値より悪い側がQC不合格になる境界)。
+                # 凡例に加えて、線のすぐ左側にも値を直接表示する (凡例は軸の外側で離れているため)
                 ax.axhline(thr, color='black', linewidth=0.6, linestyle='--', label=f'QC threshold ({thr:g})')
-            if grouped and key != 'af' and ax.get_legend_handles_labels()[0]:
+                ax.annotate(f'{thr:g}', xy=(0, thr), xycoords=('axes fraction', 'data'), xytext=(-4, 0),
+                            textcoords='offset points', ha='right', va='center', fontsize=6, clip_on=False)
+            if key != 'af' and ax.get_legend_handles_labels()[0]:
                 # 枠内に重ならないよう、軸の右上外側に配置する
                 ax.legend(loc='lower right', bbox_to_anchor=(1.0, 1.0), fontsize=5, framealpha=0.6,
                           markerscale=1.5, handletextpad=0.3, borderaxespad=0.1)
@@ -328,7 +334,9 @@ def plot_chromosome(chrom, cyto, before, after, thresholds, window_mb, af_groups
             ax.tick_params(labelsize=7)
     axes[-1].set_xlabel('Position (Mb)')
     axes[-1].set_xlim(-pad_mb, length_mb + pad_mb)
-    fig.suptitle(f'{chrom} (window={window_mb:g} Mb)', fontsize=11)
+    window_bp = round(window_mb * 1_000_000)
+    window_label = f'{window_bp} bp' if window_bp < 1_000_000 else f'{window_mb:g} Mb'
+    fig.suptitle(f'{chrom} (window={window_label})', fontsize=11)
     fig.tight_layout(rect=(0.07, 0, 1, 0.98))   # 指標名ラベル用に左側へ余白を確保
 
     # Before/After 1組ごとに、指標名をまたがる大きなラベルを付ける (比較が1セットだと分かるように)
@@ -347,7 +355,7 @@ def main():
     ap.add_argument('--before', required=True, help='補正前の batch_af_test_vcf.py 出力 (<prefix>.tsv.gz)')
     ap.add_argument('--after', required=True, help='補正後の batch_af_test_vcf.py 出力 (<prefix>.tsv.gz, 通常 --no-gt-filter)')
     ap.add_argument('-o', '--outdir', required=True, help='染色体ごとのPNGを書き出すディレクトリ')
-    ap.add_argument('--window-mb', type=float, default=0.01, help='集計する窓のサイズ (Mb, 既定 0.01 = 10kb)')
+    ap.add_argument('--window-mb', type=float, default=1e-6, help='集計する窓のサイズ (Mb, 既定 1e-6 = 1bp、つまり集計なし)')
     ap.add_argument('--cytoband', default=DEFAULT_CYTOBAND,
                      help=f'UCSC cytoBandIdeo ファイル (既定の配置先: {DEFAULT_CYTOBAND})')
     ap.add_argument('--chroms', help='対象染色体 (カンマ区切り)。既定: 両方の入力にデータがある染色体すべて')

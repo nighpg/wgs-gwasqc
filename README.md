@@ -86,7 +86,8 @@ transformed; only the p-value Y-axes use a log scale. `AF`, `HWE` and `ExcHet` a
 (the same group name keeps the same color across tracks), since their raw values exist per group in the
 diagnostics file; `dAF`, `dMISS` and `P_batch` have no per-group raw value (they are already a difference
 or a pooled test), so they stay as a single series.
-Use `--window-mb` to change the aggregation window (default 0.01 Mb = 10 kb).
+Use `--window-mb` to change the aggregation window (default 1e-6 = 1 bp, i.e. no aggregation). For
+genome-wide real data, pass e.g. `--window-mb 0.01` (10 kb) if there are too many points to render quickly.
 
 ## Singularity / Apptainer
 
