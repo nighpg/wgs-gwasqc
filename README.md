@@ -68,26 +68,21 @@ disappear after correction):
 
 ![plot_batch_effect.py example output](docs/images/plot_batch_effect_example.png)
 
-Each PNG shows the ideogram (G-bands, centromere, telomeres), then one Before/After pair of tracks per
-metric (`AF` with `dAF` overlaid, `dMISS`, `HWE` p, `ExcHet` p, `P_batch` p), each pair labelled once with
-a large shared title so Before and After are easy to compare as a set. Each window is plotted as a point
-(not a line) at its own value, with the same Y-axis range for Before and After so noisy-before/calm-after
-changes are comparable. `AF` plots each `--batches` group's allele frequency (window median) in its own
-color; when there are exactly two groups, the second group is mirrored below zero so both groups can be
-compared at a glance (the stored value is unchanged, only the display is flipped). Because the gap
-between the two mirrored `AF` points reflects their sum rather than their difference, `dAF` (the actual
-signed difference: positive means the first `--batches` group has the higher value, negative means the
-second group does) is overlaid on the same panel as a line on a secondary Y-axis that shares the exact
-same range as `AF`, so its true (usually much smaller) magnitude relative to `AF` stays honest rather than
-being independently rescaled to fill the panel. `dMISS`/`P_batch` are also the window median (signed),
-and `HWE`/`ExcHet` p is the window minimum (i.e. the worst site in the window). No value is otherwise
-transformed; only the p-value Y-axes use a log scale. `AF`, `HWE` and `ExcHet` are plotted per group (the
-`--batches`/`--hwe-groups` used when running `batch_af_test_vcf.py`), each in its own color with a legend
-(the same group name keeps the same color across tracks), since their raw values exist per group in the
-diagnostics file; `dAF`, `dMISS` and `P_batch` have no per-group raw value (they are already a difference
-or a pooled test), so they stay as a single series.
-Use `--window-mb` to change the aggregation window (default 1e-6 = 1 bp, i.e. no aggregation). For
-genome-wide real data, pass e.g. `--window-mb 0.01` (10 kb) if there are too many points to render quickly.
+**What this plot shows**
+
+Rather than filtering sites simply by allele frequency (AF) differences between batches, this tool selects sites and regions using quality metrics such as **HWE, heterozygosity excess (ExcHet), and missingness**.
+
+- **Before**: Around regions such as centromeres, differences in sequencers or processing conditions tend to produce apparent differences (noise). The plot helps check where batch differences or p-value disturbances occur.
+- **After**: Removing problematic sites and regions based on quality metrics calms the noise. This makes it easier to detect truly significant variants shared across both batches without being misled by false batch-driven signals.
+
+**Plot layout and main options**
+
+- **Layout**: The chromosome diagram (ideogram) is at the top, followed by paired **Before / After** tracks for each metric. Each pair shares the same Y-axis range so changes can be compared directly.
+- **AF / dAF**: Allele frequencies per batch are plotted as colored points (with two batches, the second batch is flipped downward). The difference between the two batches (`dAF`) is overlaid as a line on the right Y-axis.
+- **dMISS**: Missingness-rate difference between batches.
+- **P_batch / HWE / ExcHet**: p-values on a log scale, with dashed lines marking thresholds (`P_batch` is for diagnostics only and is not used for filtering).
+- **Colors**: `AF`, `HWE`, and `ExcHet` are colored consistently by group across tracks.
+- **`--window-mb`**: Aggregation window size (default `1e-6` = 1 bp, i.e. plot every site without aggregation). For genome-wide data with many points, pass e.g. `--window-mb 0.01` (10 kb) if rendering is slow.
 
 ## Singularity / Apptainer
 
